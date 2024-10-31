@@ -1,0 +1,23 @@
+data:
+  input_path: "dataset/db/playroom/images"
+  output_path: "output/"
+  output_index: 0
+
+#Train:
+#  batch_size: 128
+#  learning_rate: 0.01
+#  reg: 0.00005
+#  epochs: 15
+#  steps: [10, 12]
+#  warmup: 5
+#  momentum: 0.9
+#
+#network:
+#  model: MyModel # TwoLayerNet or VanillaCNN or MyModel or ResNet-32
+#
+#data:
+#  imbalance: regular # regular or imbalance
+#  save_best: True
+#
+#loss:
+#  loss_type: CE # CE or Focal
