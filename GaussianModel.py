@@ -2,7 +2,7 @@ import pycolmap
 import torch
 import torch.nn as nn
 
-from Utils.SphericalHarmonic import rgb2sh
+from Utils.SphericalHarmonic import RGB2SH
 from Utils.PointCloud import PointCloud
 from Utils.Transform import Transform
 
@@ -37,7 +37,7 @@ class GaussianModel(nn.Module):
     def from_pcd(self, pcd: PointCloud):
         coords = torch.tensor(pcd.coords).cuda()
         opacity = torch.tensor(pcd.colors[:, 3]).cuda()
-        sh = torch.tensor(rgb2sh(pcd.colors[:, :3])).cuda()
+        sh = torch.tensor(RGB2SH(pcd.colors[:, :3])).cuda()
         scale = torch.ones((pcd.size, 3), device="cuda")
         rotation = torch.zeros((pcd.size, 4), device="cuda")
         rotation[:, 0] = 1
@@ -49,9 +49,13 @@ class GaussianModel(nn.Module):
         self._scale = nn.Parameter(scale, requires_grad=True)
         self._rotation = nn.Parameter(rotation, requires_grad=True)
 
-    def get_covariance(self):
-        rot_matrices = Transform.get_rotation_matrices(self._rotation, is_cuda=True)
-        scale_matrices = Transform.get_scale_matrices(self._scale, is_cuda=True)
+    def get_covariance(self, mask: torch.tensor = None):
+        rot = self._rotation
+        scale = self._scale
+        if mask is not None:
+            rot = rot[mask]
+            scale = scale[mask]
+        rot_matrices = Transform.get_rotation_matrices(rot, is_cuda=True)
+        scale_matrices = Transform.get_scale_matrices(scale, is_cuda=True)
         ans = torch.bmm(rot_matrices, scale_matrices)
         return torch.bmm(ans, ans.transpose(1,2))
-    

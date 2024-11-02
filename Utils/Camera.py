@@ -25,12 +25,73 @@ class Camera(nn.Module):
         self.word2camera_matrix = self.transform.get_world2model_matrix()
         self.projection_matrix = self.get_projection_matrix(self.znear, self.zfar, self.fovX, self.fovY)
 
+    def get_covariance2d(self, ppos: torch.tensor, pcov: torch.tensor):
+        """
+        project covariance matrix in 3d to 2d
+        :param ppos: gauss position in 3d (shape Nx3)
+        :param pcov: gauss covariance matrix in 3d (shape Nx3x3)
+        :return: covariance matrix in 2d (shape Nx2x2)
+        """
+        W = self.transform.get_world2model_matrix()[:3, :3].transpose()
+        J = torch.zeros((ppos.shape[0], 2, 3), dtype=torch.float32, device=ppos.device)
+        J[:, 0, 0] = 1 / ppos[:, 2]
+        J[:, 0, 2] = -ppos[:, 0] / ppos[:, 2]
+        J[:, 1, 1] = 1 / ppos[:, 2]
+        J[:, 1, 2] = -ppos[:, 1] / ppos[:, 2]
+        return J @ W @ pcov @ W.transpose() @ J.permute((0, 2, 1))
+
+    def get_cull_mask(self, ppos: torch.tensor, relax_factor: torch.float32 = 1.3) -> torch.tensor:
+        """
+        Compute the cull mask of ppos to indicate which points should be removed in rendering
+        :param ppos: point position (shape Nx3)
+        :param relax_factor: expand the view frustum to contain more gaussian spheres
+        :return: mask (shape N)
+        """
+        view_matrix = self.transform.get_world2model_matrix().transpose()
+        p_modelpos = ppos @ view_matrix[:3, :3] + view_matrix[3, :3]
+        relax_factor = 1.3
+        x_ratio = tan(0.5 * self.fovX)
+        y_ratio = tan(0.5 * self.fovY)
+        mask = ((relax_factor * -x_ratio <= p_modelpos[:, 0] / p_modelpos[:, 2]) &
+                (p_modelpos[:, 0] / p_modelpos[:, 2] <= relax_factor * x_ratio) &
+                (relax_factor * -y_ratio <= p_modelpos[:, 1] / p_modelpos[:, 2]) &
+                (p_modelpos[:, 1] / p_modelpos[:, 2] <= relax_factor * y_ratio))
+        return mask
+
+
+    def project_gaussian(self, ppos: torch.tensor, pcov: torch.tensor) -> (torch.tensor, torch.tensor):
+        """
+        Project gaussian sphere from 3d space to 2d
+        :param ppos: gaussian spheres' position (shape Nx3)
+        :param pcov: gaussian spheres' covariance matrix in 3d with shape (shape Nx3x3)
+        :return: position and covariance matrix on screen in 2d shape (shape Nx3, N, Nx2x2),
+                 third element of position is its depth
+        """
+        device = ppos.device
+        view_matrix = self.transform.get_world2model_matrix().transpose()
+        p_modelpos = ppos @ view_matrix[:3, :3] + view_matrix[3, :3]
+
+        # project the position into 2d
+            # MVP matrix to project into NDC space
+        projection_matrix = self.get_projection_matrix(self.znear, self.zfar, self.fovX, self.fovY).transpose()
+        p_modelpos = torch.cat([p_modelpos, torch.ones((p_modelpos.shape[0], 1), device=p_modelpos.device)], dim=1)
+        p_ndc = p_modelpos @ projection_matrix
+        p_ndc = p_ndc[:, :3] / (p_ndc[:, 3].unsqueeze(1) + 0.000001)
+            # convert the position to screen space
+            # NOTE: maybe remove negative z value in future?
+        p_ndc[:, 0] = 0.5 * (p_ndc[:, 0] + 1) * self.width
+        p_ndc[:, 1] = (1 - 0.5 * (p_ndc[:, 1] + 1)) * self.height
+
+        # project the covariance into 2d
+        pcov2d = self.get_covariance2d(ppos, pcov, device=device)
+        return p_ndc, pcov2d
+
     @staticmethod
     def get_projection_matrix(znear: float, zfar: float, fovX: float, fovY: float):
         """
         :param znear: screen distance to render the image
         :param zfar: maximum distance to have object visible on screen
-        :param fovX: field of view in X axis, represent width
+        :param fjwovX: field of view in X axis, represent width
         :param fovY: field of view in Y axis, represent height
         :return: projection matrix to project points in view frustum onto screen image
         """
