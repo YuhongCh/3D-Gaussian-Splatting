@@ -50,7 +50,7 @@ def eval_sh(deg, sh, dirs):
     ... Can be 0 or more batch dimensions.
     Args:
         deg: int SH deg. Currently, 0-3 supported
-        sh: jnp.ndarray SH coeffs [..., C, (deg + 1) ** 2]
+        sh: np.ndarray SH coeffs [..., C, (deg + 1) ** 2]
         dirs: jnp.ndarray unit directions [..., 3]
     Returns:
         [..., C]

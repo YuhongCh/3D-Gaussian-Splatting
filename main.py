@@ -1,7 +1,11 @@
 import yaml
 import argparse
 from Utils.DataLoader import DataLoader
-from Scene import Scene
+from Utils.PointCloud import PointCloud
+
+from GaussianModel import GaussianModel
+from GaussianRender import GaussianRender
+
 
 parser = argparse.ArgumentParser(description='3D Gaussian Splatting')
 parser.add_argument('--config', default='configs/playroom.yaml')
@@ -19,12 +23,9 @@ def main():
     # load SfM data
     loader = DataLoader(args.input_path, args.output_path)
     sfm_scene = loader.load(args.output_index)
+    pcd = PointCloud()
+    pcd.set_coords()
 
-    # initialize the scene
-    params = {
-        'capacity': 1e6
-    }
-    scene = Scene(sfm_scene, params)
 
 
 if __name__ == "__main__":

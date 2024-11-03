@@ -58,8 +58,7 @@ class Camera(nn.Module):
                 (p_modelpos[:, 1] / p_modelpos[:, 2] <= relax_factor * y_ratio))
         return mask
 
-
-    def project_gaussian(self, ppos: torch.tensor, pcov: torch.tensor) -> (torch.tensor, torch.tensor):
+    def project_gaussian(self, pos3d: torch.tensor, cov3d: torch.tensor, relax_factor: float = 1.3) -> (torch.tensor, torch.tensor):
         """
         Project gaussian sphere from 3d space to 2d
         :param ppos: gaussian spheres' position (shape Nx3)
@@ -67,24 +66,27 @@ class Camera(nn.Module):
         :return: position and covariance matrix on screen in 2d shape (shape Nx3, N, Nx2x2),
                  third element of position is its depth
         """
-        device = ppos.device
-        view_matrix = self.transform.get_world2model_matrix().transpose()
-        p_modelpos = ppos @ view_matrix[:3, :3] + view_matrix[3, :3]
 
-        # project the position into 2d
-            # MVP matrix to project into NDC space
+        ''' Project position into ndc space with MVP matrix '''
+        device = pos3d.device
+        view_matrix = self.transform.get_world2model_matrix().transpose()
         projection_matrix = self.get_projection_matrix(self.znear, self.zfar, self.fovX, self.fovY).transpose()
+        p_modelpos = pos3d @ view_matrix[:3, :3] + view_matrix[3, :3]
         p_modelpos = torch.cat([p_modelpos, torch.ones((p_modelpos.shape[0], 1), device=p_modelpos.device)], dim=1)
         p_ndc = p_modelpos @ projection_matrix
         p_ndc = p_ndc[:, :3] / (p_ndc[:, 3].unsqueeze(1) + 0.000001)
-            # convert the position to screen space
-            # NOTE: maybe remove negative z value in future?
-        p_ndc[:, 0] = 0.5 * (p_ndc[:, 0] + 1) * self.width
-        p_ndc[:, 1] = (1 - 0.5 * (p_ndc[:, 1] + 1)) * self.height
 
-        # project the covariance into 2d
-        pcov2d = self.get_covariance2d(ppos, pcov, device=device)
-        return p_ndc, pcov2d
+        ''' Create cull mask, recall ndc space should be [-1, 1] '''
+        mask = (p_ndc[:, 2] >= 0.2 &
+                -relax_factor <= p_ndc[:, 0] & p_ndc[:, 0] <= relax_factor &
+                -relax_factor <= p_ndc[:, 1] & p_ndc[:, 1] <= relax_factor)
+
+        ''' Compute position and covariance in screen space with cull mask '''
+        pos2d = p_ndc[mask]
+        pos2d[:, 0] = 0.5 * (pos2d[:, 0] + 1) * self.width
+        pos2d[:, 1] = (1 - 0.5 * (pos2d[:, 1] + 1)) * self.height
+        cov2d = self.get_covariance2d(pos3d[mask], cov3d[mask], device=device)
+        return pos2d, cov2d, mask
 
     @staticmethod
     def get_projection_matrix(znear: float, zfar: float, fovX: float, fovY: float):

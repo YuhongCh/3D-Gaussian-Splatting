@@ -17,6 +17,7 @@ class GaussianModel(nn.Module):
         self._sh = torch.empty(0)
         self._opacity = torch.empty(0)
         self._size = 0
+        self._device = None
 
     @property
     def coords(self):
@@ -34,15 +35,27 @@ class GaussianModel(nn.Module):
     def opacity(self):
         return self._opacity
 
+    @property
+    def sh(self):
+        return self._sh
+
+    @property
+    def sh_degree(self):
+        return self._sh_degree
+
     def from_pcd(self, pcd: PointCloud):
-        coords = torch.tensor(pcd.coords).cuda()
-        opacity = torch.tensor(pcd.colors[:, 3]).cuda()
-        sh = torch.tensor(RGB2SH(pcd.colors[:, :3])).cuda()
-        scale = torch.ones((pcd.size, 3), device="cuda")
-        rotation = torch.zeros((pcd.size, 4), device="cuda")
+        self._size = pcd.size
+        self._device = pcd.device
+
+        coords = torch.tensor(pcd.coords, dtype=torch.float32, device=self._device)
+        opacity = torch.tensor(pcd.colors[:, 3], dtype=torch.float32, device=self._device)
+        sh = torch.zeros((self._size, 3, (self._sh_degree + 1) ** 2), dtype=torch.float32, device=self._device)
+        sh[:, :, 0] = RGB2SH(pcd.colors[:, 3])
+
+        scale = torch.ones((self._size, 3), device=self._device)
+        rotation = torch.zeros((self._size, 4), device=self._device)
         rotation[:, 0] = 1
 
-        self._size = pcd.size
         self._coords = nn.Parameter(coords, requires_grad=True)
         self._opacity = nn.Parameter(opacity, requires_grad=True)
         self._sh = nn.Parameter(sh, requires_grad=True)

@@ -3,10 +3,11 @@ import torch
 
 
 class PointCloud:
-    def __init__(self, size: int = 1000):
+    def __init__(self, size: int = 1000, device: str = None):
         """
         :param size: number of point in pcd, each has coord XYZ and color RGBA
         """
+        self._device = device
         self._size = size
         self._coords = np.zeros((self._size, 3), dtype=np.float32)
         self._colors = np.zeros((self._size, 4), dtype=np.int8)   # [0, 255]
@@ -25,6 +26,10 @@ class PointCloud:
     @property
     def size(self):
         return self._size
+
+    @property
+    def device(self):
+        return self._device
 
     def resize(self, size: int):
         """
@@ -90,3 +95,69 @@ class PointCloud:
         pcd.set_coords(np.concatenate((pcd1.coords, pcd2.coords), axis=0))
         pcd.set_colors(np.concatenate((pcd1.colors, pcd2.colors), axis=0))
         return pcd
+
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+Below referenced from https://github.com/openai/point-e/blob/main/point_e/util/ply_util.py 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+import io
+import struct
+from contextlib import contextmanager
+from typing import BinaryIO, Iterator, Optional
+
+
+def write_ply(raw_f: BinaryIO, coords: np.ndarray, rgb: Optional[np.ndarray] = None, faces: Optional[np.ndarray] = None):
+    """
+    Write a PLY file for a mesh or a point cloud.
+
+    :param coords: an [N x 3] array of floating point coordinates.
+    :param rgb: an [N x 3] array of vertex colors, in the range [0.0, 1.0].
+    :param faces: an [N x 3] array of triangles encoded as integer indices.
+    """
+    with buffered_writer(raw_f) as f:
+        f.write(b"ply\n")
+        f.write(b"format binary_little_endian 1.0\n")
+        f.write(bytes(f"element vertex {len(coords)}\n", "ascii"))
+        f.write(b"property float x\n")
+        f.write(b"property float y\n")
+        f.write(b"property float z\n")
+        if rgb is not None:
+            f.write(b"property uchar red\n")
+            f.write(b"property uchar green\n")
+            f.write(b"property uchar blue\n")
+        if faces is not None:
+            f.write(bytes(f"element face {len(faces)}\n", "ascii"))
+            f.write(b"property list uchar int vertex_index\n")
+        f.write(b"end_header\n")
+
+        if rgb is not None:
+            rgb = (rgb * 255.499).round().astype(int)
+            vertices = [
+                (*coord, *rgb)
+                for coord, rgb in zip(
+                    coords.tolist(),
+                    rgb.tolist(),
+                )
+            ]
+            format = struct.Struct("<3f3B")
+            for item in vertices:
+                f.write(format.pack(*item))
+        else:
+            format = struct.Struct("<3f")
+            for vertex in coords.tolist():
+                f.write(format.pack(*vertex))
+
+        if faces is not None:
+            format = struct.Struct("<B3I")
+            for tri in faces.tolist():
+                f.write(format.pack(len(tri), *tri))
+
+
+@contextmanager
+def buffered_writer(raw_f: BinaryIO) -> Iterator[io.BufferedIOBase]:
+    if isinstance(raw_f, io.BufferedIOBase):
+        yield raw_f
+    else:
+        f = io.BufferedWriter(raw_f)
+        yield f
+        f.flush()
