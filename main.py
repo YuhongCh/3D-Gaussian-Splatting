@@ -1,6 +1,6 @@
 import yaml
 import argparse
-from Utils.DataLoader import DataLoader
+from Utils.DataManager import DataManager
 from Utils.PointCloud import PointCloud
 
 from GaussianModel import GaussianModel
@@ -21,7 +21,7 @@ def main():
             setattr(args, k, v)
 
     # load SfM data
-    loader = DataLoader(args.input_path, args.output_path)
+    loader = DataManager(args.input_path, args.output_path)
     sfm_scene = loader.load(args.output_index)
     pcd = PointCloud()
     pcd.set_coords()

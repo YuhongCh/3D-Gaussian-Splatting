@@ -82,6 +82,10 @@ class PointCloud:
         pcd.set_coords(self.coords[indices])
         pcd.set_colors(self.colors[indices])
 
+    def save(self, ply_file: str):
+        with open(ply_file, 'wb') as writer:
+            write_ply(writer, coords=self._coords, rgb=self._colors)
+
     @staticmethod
     def combine(pcd1: "PointCloud", pcd2: "PointCloud"):
         """
@@ -106,10 +110,11 @@ from contextlib import contextmanager
 from typing import BinaryIO, Iterator, Optional
 
 
-def write_ply(raw_f: BinaryIO, coords: np.ndarray, rgb: Optional[np.ndarray] = None, faces: Optional[np.ndarray] = None):
+def write_ply(raw_f: BinaryIO, coords: np.ndarray, rgb: Optional[np.ndarray] = None,
+              faces: Optional[np.ndarray] = None):
     """
     Write a PLY file for a mesh or a point cloud.
-
+    :param raw_f: with io file open
     :param coords: an [N x 3] array of floating point coordinates.
     :param rgb: an [N x 3] array of vertex colors, in the range [0.0, 1.0].
     :param faces: an [N x 3] array of triangles encoded as integer indices.

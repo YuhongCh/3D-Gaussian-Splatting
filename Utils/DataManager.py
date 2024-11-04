@@ -3,18 +3,23 @@ import torch
 import numpy as np
 import open3d as o3d
 from pathlib import Path
+
+from Utils.Camera import Camera
 from Utils.PointCloud import PointCloud
 
 
 class DataManager:
-    def __init__(self, image_dir: str = None, sfm_dir: str = None, ply_file: str = None):
-        self.image_dir = None
-        self.sfm_dir = None
-        self.ply_file = None
+    def __init__(self, sfm_dir: str, image_dir: str = None, ply_file: str = None):
+        self.image_dir = image_dir
+        self.sfm_dir = sfm_dir
+        self.ply_file = ply_file
 
-        self.ply_data = PointCloud()
-        self.cam_data = torch.empty(0)
-        is_success = self._try_load_ply(ply_file) or self._try_load_sfm(sfm_dir) or self._try_load_image(image_dir)
+        self.pcd_data = PointCloud()
+        self.image_data = torch.empty()
+        self.cam_data = {}
+
+        is_success = self._try_load_sfm(sfm_dir) or self._try_load_image(image_dir)
+        is_success = is_success and self._try_load_ply(self.ply_file)
         if not is_success:
             raise OSError("Failed to load the data")
 
@@ -27,8 +32,8 @@ class DataManager:
             return False
 
         pcd = o3d.io.read_point_cloud(ply_file)
-        self.ply_data.set_coords(np.asarray(pcd.points))
-        self.ply_data.set_colors(np.asarray(pcd.colors))
+        self.pcd_data.set_coords(np.asarray(pcd.points))
+        self.pcd_data.set_colors(np.asarray(pcd.colors))
         print("Success load ply data")
         return True
 
@@ -72,7 +77,16 @@ class DataManager:
         return self._try_parse_sfm(sfm_scene)
 
     def _try_parse_sfm(self, sfm_scene: pycolmap.Reconstruction) -> bool:
-        return False
+        # parse point cloud data
+        points = np.zeros((sfm_scene.num_points3D(), 3), dtype=np.float32)
+        colors = np.zeros((sfm_scene.num_points3D(), 3), dtype=np.float32)
+        for index, point_id in enumerate(sfm_scene.point3D_ids()):
+            point = sfm_scene.points3D(point_id)
+            points[index] = point.xyz
+            colors[index] = point.color
+        self.pcd_data.set_coords(points)
+        self.pcd_data.set_colors(colors)
 
-
+        for cid, camera in sfm_scene.cameras.items():
+          self.cam_data[cid] = Camera()
 
