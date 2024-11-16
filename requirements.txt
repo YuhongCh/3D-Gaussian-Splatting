@@ -1,0 +1,6 @@
+pycolmap=0.6.1
+pycolmap~=0.6.1
+torch~=2.2.0+cu121
+numpy~=1.23.1
+opencv-python~=4.9.0.80
+PyYAML~=6.0

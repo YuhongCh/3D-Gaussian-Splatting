@@ -1,10 +1,12 @@
 import yaml
 import argparse
-from Utils.DataManager import DataManager
-from Utils.PointCloud import PointCloud
 
+import cv2
+
+from Utils.DataLoader import DataLoader
 from GaussianModel import GaussianModel
-from GaussianRender import GaussianRender
+from GaussianRenderer import GaussianRenderer
+from Utils.ContainerUtils import torch2numpy
 
 
 parser = argparse.ArgumentParser(description='3D Gaussian Splatting')
@@ -20,12 +22,17 @@ def main():
         for k, v in config[key].items():
             setattr(args, k, v)
 
-    # load SfM data
-    loader = DataManager(args.input_path, args.output_path)
-    sfm_scene = loader.load(args.output_index)
-    pcd = PointCloud()
-    pcd.set_coords()
+    dataloader = DataLoader(image_dir="dataset/db/playroom/images", sfm_dir="sfm_directory")
+    dataloader.extract_keypoint()
+    pcd = dataloader.get_pcd()
 
+    model = GaussianModel.from_pcd(pcd)
+    renderer = GaussianRenderer(model)
+    cam = dataloader.get_random_camera()
+    result = renderer.render(cam).detach().cpu().numpy()
+    result = cv2.cvtColor(result.transpose((1, 0, 2)), cv2.COLOR_RGB2BGR)
+    cv2.imwrite("result.jpg", result * 255 * 3)
+    cv2.imwrite("target.jpg", cv2.cvtColor(torch2numpy(cam.target_image), cv2.COLOR_RGB2BGR))
 
 
 if __name__ == "__main__":

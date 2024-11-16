@@ -1,34 +1,44 @@
-import numpy as np
 import torch
+import numpy as np
 
 
 class PointCloud:
-    def __init__(self, size: int = 1000, device: str = None):
-        """
-        :param size: number of point in pcd, each has coord XYZ and color RGBA
-        """
-        self._device = device
-        self._size = size
-        self._coords = np.zeros((self._size, 3), dtype=np.float32)
-        self._colors = np.zeros((self._size, 4), dtype=np.int8)   # [0, 255]
+    def __init__(self, device: str = None):
+        self._size = 0
+        self._coords = np.empty((0, 3))
+        self._colors = np.empty((0, 3))
+
+        if device is not None:
+            self._device = device
+        else:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._device = device
 
     def __repr__(self):
         return f'coords: {self._coords.shape[0]} \t colors: {self._colors.shape[0]}'
 
     @property
-    def coords(self):
+    def coords(self) -> np.ndarray:
         return self._coords
 
     @property
-    def colors(self):
+    def coords_torch(self) -> torch.Tensor:
+        return torch.from_numpy(self._coords).to(self._device)
+
+    @property
+    def colors(self) -> np.ndarray:
         return self._colors
 
     @property
-    def size(self):
+    def colors_torch(self) -> torch.Tensor:
+        return torch.from_numpy(self._colors).to(self._device)
+
+    @property
+    def size(self) -> int:
         return self._size
 
     @property
-    def device(self):
+    def device(self) -> str:
         return self._device
 
     def resize(self, size: int):
@@ -42,7 +52,7 @@ class PointCloud:
         elif self._size < size:
             extra_size = size - self._size
             self._coords = np.concatenate((self._coords, np.zeros((extra_size, 3), dtype=np.float32)), axis=0)
-            self._colors = np.concatenate((self._colors, np.zeros((extra_size, 4), dtype=np.int8)), axis=0)
+            self._colors = np.concatenate((self._colors, np.zeros((extra_size, 3), dtype=np.uint8)), axis=0)
         else:
             self._coords = self._coords[:size, :]
             self._colors = self._colors[:size, :]
@@ -64,11 +74,11 @@ class PointCloud:
         NOTE: size of coords array will also change in size accordingly
         :param colors: np array of shape (N, 4)
         """
-        assert (len(colors.shape) == 2 and colors.shape[1] == 4)
+        assert (len(colors.shape) == 2 and colors.shape[1] == 3)
         self.resize(colors.shape[0])
         self._colors = colors
 
-    def random_sample(self, num_points: int):
+    def random_sample(self, num_points: int) -> "PointCloud":
         """
         Sample a random subset of this PointCloud.
         :param num_points: maximum number of points to sample.
@@ -81,6 +91,7 @@ class PointCloud:
         indices = np.random.choice(self._size, size=(num_points,), replace=False)
         pcd.set_coords(self.coords[indices])
         pcd.set_colors(self.colors[indices])
+        return pcd
 
     def save(self, ply_file: str):
         with open(ply_file, 'wb') as writer:

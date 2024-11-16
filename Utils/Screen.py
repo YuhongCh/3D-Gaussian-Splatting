@@ -11,13 +11,18 @@ class Screen(nn.Module):
         self.width = width
         self.height = height
         self.num_tile = num_tile
-        self.device = device
+
+        if device is None:
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = device
 
         self.block_width = ceil(self.height / self.num_tile)
         self.block_height = ceil(self.height / self.num_tile)
 
-        self.pixel_pos = torch.tensor([torch.arange(0, 1, 1 / self.width), torch.arange(0, 1, 1 / self.height)],
-                                      dtype=torch.float32, device=self.device)
+        self.pixel_pos = torch.stack(
+            torch.meshgrid(torch.arange(self.width), torch.arange(self.height), indexing='xy'), dim=-1
+        ).to(self.device)
         self.tile_count = torch.zeros(self.num_tile * self.num_tile, dtype=torch.int32, device=self.device)
         self.tile_indices = torch.empty(0)
 
@@ -41,7 +46,8 @@ class Screen(nn.Module):
             for xi in range(xmin_indices[index], xmax_indices[index] + 1):
                 for yi in range(ymin_indices[index], ymax_indices[index] + 1):
                     tile_index = self.convert_2dto1d(xi, yi)
-                    target_index = self.tile_count[tile_index] + count[tile_index]
+                    prev = 0 if tile_index == 0 else self.tile_count[tile_index - 1]
+                    target_index = prev + count[tile_index]
                     self.tile_indices[target_index] = index
                     count[tile_index] += 1
 
@@ -50,7 +56,7 @@ class Screen(nn.Module):
         for si, stream in enumerate(tile_streams):
             with torch.cuda.stream(stream):
                 prev, curr = self.get_indices_range(si)
-                sorted_indices = torch.argsort(depth[prev:curr])
+                sorted_indices = torch.argsort(depth[self.tile_indices[prev:curr]])
                 self.tile_indices[prev:curr] = self.tile_indices[prev:curr][sorted_indices]
 
     def convert_2dto1d(self, xi: int, yi: int):
@@ -73,7 +79,7 @@ class Screen(nn.Module):
         bottom = clip((yi + 1) * self.block_height, 0, self.height, dtype=int)
         return right, bottom
 
-    def get_indices_range(self, tile_index) -> (int, int):
-        assert (0 <= tile_index <= self.num_tile * self.num_tile)
-        prev = 0 if tile_index == 0 else self.tile_indices[tile_index - 1]
-        return prev, self.tile_indices[tile_index]
+    def get_indices_range(self, tile_index: int) -> (int, int):
+        assert (0 <= tile_index < self.num_tile * self.num_tile)
+        prev = 0 if tile_index == 0 else self.tile_count[tile_index - 1]
+        return prev, self.tile_count[tile_index]
