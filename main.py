@@ -1,12 +1,10 @@
+import os
 import yaml
 import argparse
 
-import cv2
-
 from Utils.DataLoader import DataLoader
 from GaussianModel import GaussianModel
-from GaussianRenderer import GaussianRenderer
-from Utils.ContainerUtils import torch2numpy
+from Trainer import Trainer
 
 
 parser = argparse.ArgumentParser(description='3D Gaussian Splatting')
@@ -22,17 +20,21 @@ def main():
         for k, v in config[key].items():
             setattr(args, k, v)
 
-    dataloader = DataLoader(image_dir="dataset/db/playroom/images", sfm_dir="sfm_directory")
+    dataloader = DataLoader(image_dir="dataset/db/playroom/images", sfm_dir="sfm_directory", seed=123)
     dataloader.extract_keypoint()
-    pcd = dataloader.get_pcd()
+    dataloader.split_train_validate_data()
 
-    model = GaussianModel.from_pcd(pcd)
-    renderer = GaussianRenderer(model)
-    cam = dataloader.get_random_camera()
-    result = renderer.render(cam).detach().cpu().numpy()
-    result = cv2.cvtColor(result.transpose((1, 0, 2)), cv2.COLOR_RGB2BGR)
-    cv2.imwrite("result.jpg", result * 255 * 3)
-    cv2.imwrite("target.jpg", cv2.cvtColor(torch2numpy(cam.target_image), cv2.COLOR_RGB2BGR))
+    model_path = "checkpoints/model.ply"
+    if not os.path.exists(model_path):
+        pcd = dataloader.get_pcd()
+        model = GaussianModel.from_pcd(pcd)
+    else:
+        model = GaussianModel()
+        model.load_ply(model_path)
+    trainer = Trainer(model, dataloader, train_steps=10, debug=True)
+    # trainer.train()
+    trainer.evaluate()
+    model.save_ply(model_path)
 
 
 if __name__ == "__main__":

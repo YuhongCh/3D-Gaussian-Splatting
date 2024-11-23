@@ -38,7 +38,7 @@ class Transform:
     @staticmethod
     def get_rotation_matrices(q_array, use_torch: bool = False):
         """
-        convert quaternions q_array to rotation matrices.
+        convert quaternions q_array to rotation matrices. q_array elements MUST be in form [w, x, y, z]
         :param q_array: array of quaternion with shape (N, 4), MUST accept slicing here
         :param use_torch: decide whether return the data in torch or numpy
         :return: matrices of shape (N, 4, 4)
@@ -54,11 +54,11 @@ class Transform:
         rot[:, 0, 1] = 2 * (q_array[:, 1] * q_array[:, 2] - q_array[:, 0] * q_array[:, 3])
         rot[:, 0, 2] = 2 * (q_array[:, 1] * q_array[:, 3] + q_array[:, 0] * q_array[:, 2])
         rot[:, 1, 0] = 2 * (q_array[:, 1] * q_array[:, 2] + q_array[:, 0] * q_array[:, 3])
-        rot[:, 1, 1] = 2 * (q_array[:, 0] * q_array[:, 0] + q_array[:, 1] * q_array[:, 1]) - 1
+        rot[:, 1, 1] = 2 * (q_array[:, 0] * q_array[:, 0] + q_array[:, 2] * q_array[:, 2]) - 1
         rot[:, 1, 2] = 2 * (q_array[:, 2] * q_array[:, 3] - q_array[:, 0] * q_array[:, 1])
         rot[:, 2, 0] = 2 * (q_array[:, 1] * q_array[:, 3] - q_array[:, 0] * q_array[:, 2])
         rot[:, 2, 1] = 2 * (q_array[:, 2] * q_array[:, 3] + q_array[:, 0] * q_array[:, 1])
-        rot[:, 2, 2] = 2 * (q_array[:, 0] * q_array[:, 0] + q_array[:, 1] * q_array[:, 1]) - 1
+        rot[:, 2, 2] = 2 * (q_array[:, 0] * q_array[:, 0] + q_array[:, 3] * q_array[:, 3]) - 1
         rot[:, 3, 3] = 1
 
         return rot
@@ -99,10 +99,9 @@ class Transform:
 
     @staticmethod
     def get_inv_scale_matrix(x: float, y: float, z: float, use_torch: bool = False):
-        return Transform.get_scale_matrix(1.0 / (x + 0.000001),
-                                          1.0 / (y + 0.000001),
-                                          1.0 / (z + 0.000001),
-                                          use_torch=use_torch)
+        if x == 0 or y == 0 or z == 0:
+            raise RuntimeError(f"Cannot divide by zero with components ({x},{y},{z})")
+        return Transform.get_scale_matrix(1.0 / x, 1.0 / x, 1.0 / z, use_torch=use_torch)
 
     @staticmethod
     def get_translation_matrix(x: float, y: float, z: float, use_torch: bool = False):
@@ -128,7 +127,7 @@ class Transform:
                self.get_scale_matrix(self.scale[0], self.scale[1], self.scale[2]))
         if use_torch:
             return numpy2torch(m2w)
-        return torch2numpy(m2w)
+        return m2w
 
     def get_world2model_matrix(self, use_torch: bool = False):
         w2m = (self.get_inv_translation_matrix(self.position[0], self.position[1], self.position[2]) @
@@ -136,13 +135,14 @@ class Transform:
                self.get_inv_scale_matrix(self.scale[0], self.scale[1], self.scale[2]))
         if use_torch:
             return numpy2torch(w2m)
-        return torch2numpy(w2m)
+        return w2m
 
     def get_covariance(self, use_torch: bool = False):
         rotation = self.get_rotation_matrix(self.rotation[0], self.rotation[1], self.rotation[2], self.rotation[3])
         scale = self.get_scale_matrix(self.scale[0], self.scale[1], self.scale[2])
-        cov = rotation @ scale @ (rotation @ scale).transpose()
+        rs = rotation @ scale
+        cov = rs @ rs.T
 
         if use_torch:
             return numpy2torch(cov)
-        return torch2numpy(cov)
+        return cov

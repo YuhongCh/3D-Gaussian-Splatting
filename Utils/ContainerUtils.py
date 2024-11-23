@@ -25,5 +25,5 @@ def numpy2torch(arr, device=None):
 
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    return torch.from_numpy(arr, device=device)
+    return torch.from_numpy(arr).to(device=device)
 

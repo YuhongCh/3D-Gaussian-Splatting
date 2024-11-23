@@ -3,5 +3,8 @@ dataset/
 *.iml
 *.xml
 .idea/
-pycolmap/
 configs/
+sfm_directory/
+result/
+log/
+SubModules/
