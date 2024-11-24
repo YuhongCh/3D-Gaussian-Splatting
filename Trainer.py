@@ -1,6 +1,7 @@
 import torch
 import torch.optim as optim
 import cv2
+from tqdm import tqdm
 
 from Utils.ContainerUtils import torch2numpy, numpy2torch
 from Utils.Loss import l1_loss, ssim_loss
@@ -43,8 +44,8 @@ class Trainer:
         return 1
 
     def train(self):
+        progress_bar = tqdm(range(0, self.train_steps), desc="Training progress")
         for train_step in range(1, self.train_steps + 1):
-            print(f"----------------- Iteration {train_step} -----------------")
             rendered_image = None
             while rendered_image is None:
                 self.optimizer.zero_grad(set_to_none=True)
@@ -74,6 +75,11 @@ class Trainer:
                     torch.save((self.model.capture(self.optimizer), train_step), f"checkpoints/checkpoint{train_step}.pth")
 
             self.optimizer.step()
+            if train_step % 10 == 0:
+                progress_bar.set_postfix({"Loss": f"{loss}"})
+                progress_bar.update(10)
+        progress_bar.close()
+
 
     def evaluate(self, train_step: int = 0):
         cam, target_image = self.dataloader.sample(is_train=False)

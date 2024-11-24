@@ -33,9 +33,9 @@ def main():
         model = GaussianModel()
         model.load_ply(model_path)
     trainer = Trainer(model, dataloader, train_steps=5000, debug=False)
-    # trainer.evaluate()
-    trainer.train()
-    model.save_ply(model_path)
+    trainer.evaluate()
+    # trainer.train()
+    # model.save_ply(model_path)
 
 
 if __name__ == "__main__":

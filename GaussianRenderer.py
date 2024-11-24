@@ -8,13 +8,15 @@ from Utils.Screen import Screen
 from Utils.SphericalHarmonic import eval_sh
 from Utils.Probability import gaussian_distribution
 
-
 class GaussianRenderer(nn.Module):
+
+    ScreenWidth, ScreenHeight = 0, 0
+    ScreenCoordinates = torch.empty(0)
+
     def __init__(self, model: GaussianModel, debug: bool = False):
         super(GaussianRenderer, self).__init__()
         self.model = model
         self.device = self.model.coords.device
-        self.background_color = torch.tensor([0, 0, 0])
 
         if debug:
             self.prof = torch.profiler.profile(
@@ -47,13 +49,17 @@ class GaussianRenderer(nn.Module):
 
     def render(self, cam: Camera, tile_length: int = 64):
         # cull gaussian and project onto screen
+        if self.ScreenWidth != cam.width or self.ScreenHeight != cam.height:
+            self.ScreenWidth = cam.width
+            self.ScreenHeight = cam.height
+            self.ScreenCoordinates = torch.stack(
+                torch.meshgrid(torch.arange(self.ScreenWidth), torch.arange(self.ScreenHeight), indexing='ij'),
+                dim=-1).to(self.device)
         screen_coords = torch.zeros_like(self.model.coords, dtype=torch.float32, device=self.device, requires_grad=True)
 
         pos2d, cov2d, mask = cam.project_gaussian(screen_coords, self.model.coords, self.model.covariance)
         if pos2d is None and cov2d is None:
-            print(f"Observed 0 points")
             return None, None, None, None
-        print(f"Observed {pos2d.shape[0]} points")
 
         opacity = self.model.opacity[mask]
         color = eval_sh(self.model.sh_degree,
@@ -68,18 +74,16 @@ class GaussianRenderer(nn.Module):
         screen = Screen(cam.width, cam.height, tile_length, device=self.device)
         screen.create_tiles(pos2d, radius)
         screen.depth_sort(pos2d[:, 2])
-        if screen.tile_count[-1] == 0:
+        if screen.tile_count.shape[0] == 0:
             return None, None, None, None
 
         # parallelize to render
         render_color = torch.zeros((cam.width, cam.height, 3), dtype=torch.float32, device=self.device)
         for tid in range(screen.num_block):
-            # self.prof.start()
             left, top = screen.get_tl(tid)
             right, bottom = screen.get_br(tid)
             tis, tie = screen.get_indices_range(tid)
             gauss_indices = screen.tile_indices[tis:tie]
-            # print(f"tid({tid}), LR({left}, {right}), TB({top}, {bottom}), TSE({tis}, {tie}), num gauss({gauss_indices.shape[0]})")
 
             # if does not find a gauss in the region, continue
             curr_pos2d = pos2d[gauss_indices, :2]
@@ -91,11 +95,7 @@ class GaussianRenderer(nn.Module):
 
             #  Shape NxM1xM2
             gauss_prob = gaussian_distribution(curr_pos2d, curr_cov2d,
-                                               torch.stack(
-                                                   torch.meshgrid(torch.arange(left, right),
-                                                                  torch.arange(top, bottom), indexing='ij'), dim=-1
-                                               ).to(self.device),
-                                               batch_size=64)
+                                               self.ScreenCoordinates[left:right, top:bottom])
 
             # alpha has shape M1xM2xN
             alpha = torch.clamp(curr_opacity.view(-1, 1, 1) * gauss_prob,
@@ -106,6 +106,5 @@ class GaussianRenderer(nn.Module):
             ], dim=2).cumprod(dim=2)
 
             # (M1xM2xN)x(Nx3) => (M1xM2x1xN)x(Nx3) => M1xM2x1x3 => M1xM2x3
-            # print(render_color[left:right, top:bottom].shape, alpha.shape, ((alpha * weight) @ curr_color).shape)
             render_color[left:right, top:bottom] += (alpha * weight) @ curr_color
         return render_color, mask, screen_coords, radius

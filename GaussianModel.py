@@ -109,7 +109,7 @@ class GaussianModel(nn.Module):
         self._opacity[:, :] = 0.01
 
     def add_sh_degree(self):
-        self.curr_sh_degree = max(self.max_sh_degree, 1 + self.curr_sh_degree)
+        self.curr_sh_degree = min(self.max_sh_degree, 1 + self.curr_sh_degree)
 
     def expand_capacity(self, new_capacity: int):
         if self.capacity >= new_capacity:
@@ -165,7 +165,7 @@ class GaussianModel(nn.Module):
             mask = ~mask
             self._coords = self.coords[mask]
             self._opacity = self.opacity[mask]
-            self._sh = self.sh[mask]
+            self._sh = self._sh[mask]
             self._scale = self.opacity[mask]
             self._rotation = self.rotation[mask]
 
@@ -240,11 +240,6 @@ class GaussianModel(nn.Module):
         pad_grads[:min(self._size, grads.shape[0])] = grads[:self._size]
         split_mask = (torch.norm(pad_grads, dim=-1) >= 0.0002) & (torch.max(self._scale[:self._size], dim=1).values > 0.01 * scene_radius)
         self.split(split_mask[:self._size])
-
-        # determine remove
-        # remove_mask = self.opacity < min_opacity
-        # self.remove(remove_mask)
-        # torch.cuda.empty_cache()
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
