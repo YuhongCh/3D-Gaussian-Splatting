@@ -23,6 +23,7 @@ def main():
     dataloader = DataLoader(image_dir="dataset/db/playroom/images", sfm_dir="sfm_directory", seed=123)
     dataloader.extract_keypoint()
     dataloader.split_train_validate_data()
+    dataloader.compute_scene_radius()
 
     model_path = "checkpoints/model.ply"
     if not os.path.exists(model_path):
@@ -31,9 +32,8 @@ def main():
     else:
         model = GaussianModel()
         model.load_ply(model_path)
-    trainer = Trainer(model, dataloader, train_steps=10, debug=True)
-    # trainer.train()
-    trainer.evaluate()
+    trainer = Trainer(model, dataloader, train_steps=5000, debug=False)
+    trainer.train()
     model.save_ply(model_path)
 
 

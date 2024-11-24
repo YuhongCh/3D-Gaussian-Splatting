@@ -66,7 +66,7 @@ class Camera(nn.Module):
         J[:, 1, 2] = -pos2d[:, 1] / pos2d[:, 2]
         return J @ W @ cov3d @ W.T @ J.permute((0, 2, 1))
 
-    def project_gaussian(self, pos3d: torch.tensor, cov3d: torch.tensor, relax_factor: float = 1.3) -> (torch.tensor, torch.tensor):
+    def project_gaussian(self, screen_coords: torch.tensor, pos3d: torch.tensor, cov3d: torch.tensor, relax_factor: float = 1.3) -> (torch.tensor, torch.tensor):
         """
         Project gaussian sphere from 3d space to 2d
         :param pos3d: gaussian spheres' position (shape Nx3)
@@ -77,10 +77,9 @@ class Camera(nn.Module):
         """
 
         ''' Project position into ndc space with MVP matrix '''
-        w2m = self.world2model_matrix.T
-        modelpos3d = pos3d @ w2m[:3, :3] + w2m[3, :3]
-        pos3d_homo = torch.cat([modelpos3d, torch.ones((pos3d.shape[0], 1), device=self.device)], dim=1)
-        p_ndc = pos3d_homo @ self.projection_matrix.T
+        # modelpos3d = pos3d_homo @ w2m
+        pos3d_homo = torch.cat([pos3d, torch.ones((pos3d.shape[0], 1), device=self.device)], dim=1)
+        p_ndc = pos3d_homo @ self.world2model_matrix.T @ self.projection_matrix.T
         p_ndc = p_ndc[:, :3] / torch.clamp(p_ndc[:, 3][:, None], min=0.000001)
 
         ''' Create cull mask, recall ndc space should be [-1, 1] '''
@@ -89,10 +88,10 @@ class Camera(nn.Module):
                (-relax_factor <= p_ndc[:, 1]) & (p_ndc[:, 1] <= relax_factor)
 
         ''' Compute position and covariance in screen space with cull mask '''
-        pos2d = p_ndc[mask]
+        pos2d = screen_coords[mask] + p_ndc[mask]
         if pos2d.shape[0] <= 0:
             return None, None, mask
         pos2d[:, 0] = 0.5 * (pos2d[:, 0] + 1) * self.width
         pos2d[:, 1] = (1 - 0.5 * (pos2d[:, 1] + 1)) * self.height
-        cov2d = self.get_covariance2d(modelpos3d[mask], cov3d[mask])
+        cov2d = self.get_covariance2d(pos3d_homo[mask], cov3d[mask])
         return pos2d, cov2d, mask

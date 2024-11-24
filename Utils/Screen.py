@@ -39,10 +39,6 @@ class Screen(nn.Module):
         self.tile_count = torch.zeros((self.num_block_width, self.num_block_height),
                                       dtype=torch.int32, device=self.device)
         for pid in range(self.num_points):
-            # px_min, py_min = xmin[pid].item(), ymin[pid].item()
-            # px_max, py_max = xmax[pid].item(), ymax[pid].item()
-            # if px_min == px_max or py_min == py_max:
-            #     continue
             self.tile_count[xmin[pid]:xmax[pid], ymin[pid]:ymax[pid]] += 1
             torch.cuda.synchronize()
 
@@ -55,8 +51,8 @@ class Screen(nn.Module):
         count = torch.zeros((self.num_block_width, self.num_block_height), dtype=torch.int32, device=self.device)
         self.tile_indices = torch.zeros(indices_size, dtype=torch.int32, device=self.device)
         for pid in range(self.num_points):
-            px_min, py_min = xmin[pid].item(), ymin[pid].item()
-            px_max, py_max = xmax[pid].item(), ymax[pid].item()
+            px_min, py_min = xmin[pid], ymin[pid]
+            px_max, py_max = xmax[pid], ymax[pid]
             if px_min == px_max or py_min == py_max:
                 continue
             tiles = self.tile_count[px_min:px_max, py_min:py_max] + count[px_min:px_max, py_min:py_max]
@@ -80,7 +76,6 @@ class Screen(nn.Module):
     def convert_1dto2d(self, ti: int):
         xi = ti // self.num_block_height
         yi = ti - xi * self.num_block_height
-        # print(f"ti({ti}) = xi({xi}), yi({yi})")
         return xi, yi
 
     def get_tl(self, tile_index: int) -> (int, int):
@@ -98,4 +93,4 @@ class Screen(nn.Module):
     def get_indices_range(self, tile_index: int) -> (int, int):
         assert (0 <= tile_index < self.num_block)
         next_tid = self.num_points if tile_index == self.num_block - 1 else self.tile_count[tile_index + 1]
-        return self.tile_count[tile_index].item(), next_tid
+        return self.tile_count[tile_index], next_tid

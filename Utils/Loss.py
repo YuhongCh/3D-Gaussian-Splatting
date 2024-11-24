@@ -32,7 +32,6 @@ def ssim_loss(pred: torch.Tensor, gt: torch.tensor,
         return window_2d.expand(in_channel, 1, window_size, window_size)
 
     # Create 2D Gaussian filter from separable 1D filters
-    print(pred.shape, gt.shape)
     assert pred.shape == gt.shape
     window = gaussian_window().to(pred.device)
 

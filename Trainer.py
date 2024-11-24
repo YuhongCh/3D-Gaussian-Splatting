@@ -2,7 +2,7 @@ import torch
 import torch.optim as optim
 import cv2
 
-from Utils.ContainerUtils import torch2numpy
+from Utils.ContainerUtils import torch2numpy, numpy2torch
 from Utils.Loss import l1_loss, ssim_loss
 from Utils.DataLoader import DataLoader
 from GaussianModel import GaussianModel
@@ -28,14 +28,12 @@ class Trainer:
         self.debug = debug
 
         self.renderer = GaussianRenderer(self.model, self.debug)
+        self.scene_radius = numpy2torch(self.dataloader.scene_radius, device=self.renderer.device).max()
 
     def compute_loss(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
         ssim = ssim_loss(pred, gt)
         l1 = l1_loss(pred, gt)
         return (1 - self.loss_lambda) * l1 + self.loss_lambda * ssim
-
-    def on_refinement_iteration(self):
-        pass
 
     def get_image_scale(self, step: int):
         if step < 250:
@@ -44,27 +42,38 @@ class Trainer:
             return 0.5
         return 1
 
-    def on_train_step(self, step: int):
-        cam, target_image = self.dataloader.sample(is_train=True, image_scale=self.get_image_scale(step))
-        self.optimizer.zero_grad()
-
-        image = self.renderer(cam)
-        loss = self.compute_loss(image, target_image)
-        loss.backward()
-        self.optimizer.step()
-
     def train(self):
-        train_step = 0
-        while train_step < self.train_steps:
-            self.on_train_step(train_step)
-            if train_step > 0 and train_step % self.refine_cycle:
-                self.on_refinement_iteration()
-            train_step += 1
+        for train_step in range(1, self.train_steps + 1):
+            print(f"----------------- Iteration {train_step} -----------------")
+            rendered_image = None
+            while rendered_image is None:
+                self.optimizer.zero_grad(set_to_none=True)
+                cam, target_image = self.dataloader.sample(is_train=True, image_scale=self.get_image_scale(train_step))
+                rendered_image, visible_mask, screen_coords = self.renderer(cam)
+            loss = self.compute_loss(rendered_image, target_image)
+            loss.backward()
 
-    def evaluate(self):
+            # try densify the model
+            with torch.no_grad():
+                self.model.update_densify_stats(screen_coords, visible_mask)
+                if train_step > 0 and train_step % 500 == 0:
+                    self.model.add_sh_degree()
+                if train_step > 0 and train_step % 50 == 0:
+                    self.model.densify(self.scene_radius)
+                if train_step > 0 and train_step % 1500 == 0:
+                    self.model.reset_opacity()
+                if train_step > 0 and train_step % 500 == 0:
+                    print(f"Train step {train_step}: Start evaluate and save checkpoint")
+                    self.evaluate(train_step)
+                    torch.save((self.model.capture(), train_step), f"checkpoints/checkpoint{train_step}.pth")
+
+            self.optimizer.step()
+
+    def evaluate(self, train_step: int):
         cam, target_image = self.dataloader.sample(is_train=False)
-        image = self.renderer.render(cam, tile_length=64)
+        image, _, _ = self.renderer.render(cam, tile_length=64)
         np_image = torch2numpy(image.detach())
         result = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR)
-        cv2.imwrite("result.jpg", result * 255)
-        cv2.imwrite("target.jpg", cv2.cvtColor(torch2numpy(target_image), cv2.COLOR_RGB2BGR))
+        print(f"Validation Loss is {self.compute_loss(image, target_image)}")
+        cv2.imwrite(f"Validate/result{train_step}.jpg", result * 255)
+        cv2.imwrite(f"Validate/target{train_step}.jpg", cv2.cvtColor(torch2numpy(target_image), cv2.COLOR_RGB2BGR))

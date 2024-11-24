@@ -21,6 +21,7 @@ class DataLoader:
         self.sfm_reconstruction = None
         self.train_image_ids = None
         self.validate_image_ids = None
+        self.scene_radius = None
 
     def extract_keypoint(self):
         sfm_reconstruction = pycolmap.Reconstruction()
@@ -76,6 +77,26 @@ class DataLoader:
         image = torch.from_numpy(image).float().to(device)
 
         if image_scale != 1:
-            image = torch.nn.functional.interpolate(image, scale_factor=image_scale, mode='bilinear')
+            NCWH_image = image[None, :, :, :].permute((0, 3, 1, 2))
+            NCWH_image = torch.nn.functional.interpolate(NCWH_image, scale_factor=image_scale, mode='bilinear')
+            image = NCWH_image.permute((0, 2, 3, 1))[0, :, :, :]
         return Camera.from_sfm(sfm_image, sfm_camera, image.shape[0], image.shape[1]), image
+
+    def compute_scene_radius(self):
+        scene_mean = np.zeros(3, dtype=np.float32)
+        image_ids = self.sfm_reconstruction.reg_image_ids()
+        for image_id in image_ids:
+            sfm_image = self.sfm_reconstruction.images[image_id]
+            rigid3d = sfm_image.cam_from_world
+            position = rigid3d.translation
+            scene_mean += position
+
+        self.scene_radius = np.zeros(3, dtype=np.float32)
+        scene_mean /= len(image_ids)
+        for image_id in image_ids:
+            sfm_image = self.sfm_reconstruction.images[image_id]
+            rigid3d = sfm_image.cam_from_world
+            position = rigid3d.translation
+            self.scene_radius = np.maximum(self.scene_radius, np.abs(position - scene_mean))
+
 
