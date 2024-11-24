@@ -49,7 +49,7 @@ class Trainer:
             while rendered_image is None:
                 self.optimizer.zero_grad(set_to_none=True)
                 cam, target_image = self.dataloader.sample(is_train=True, image_scale=self.get_image_scale(train_step))
-                rendered_image, visible_mask, screen_coords = self.renderer(cam)
+                rendered_image, visible_mask, screen_coords, radius = self.renderer(cam)
             loss = self.compute_loss(rendered_image, target_image)
             loss.backward()
 
@@ -60,18 +60,25 @@ class Trainer:
                     self.model.add_sh_degree()
                 if train_step > 0 and train_step % 50 == 0:
                     self.model.densify(self.scene_radius)
+
+                    size_threshold = 20 if train_step > 1500 else 100
+                    remove_mask = (self.model.opacity < 0.005) & (radius > size_threshold)
+                    self.model.remove(remove_mask)
+                    torch.cuda.empty_cache()
+
                 if train_step > 0 and train_step % 1500 == 0:
                     self.model.reset_opacity()
                 if train_step > 0 and train_step % 500 == 0:
                     print(f"Train step {train_step}: Start evaluate and save checkpoint")
                     self.evaluate(train_step)
-                    torch.save((self.model.capture(), train_step), f"checkpoints/checkpoint{train_step}.pth")
+                    torch.save((self.model.capture(self.optimizer), train_step), f"checkpoints/checkpoint{train_step}.pth")
 
             self.optimizer.step()
 
-    def evaluate(self, train_step: int):
+    def evaluate(self, train_step: int = 0):
         cam, target_image = self.dataloader.sample(is_train=False)
-        image, _, _ = self.renderer.render(cam, tile_length=64)
+        image, _, _, _ = self.renderer.render(cam, tile_length=32)
+
         np_image = torch2numpy(image.detach())
         result = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR)
         print(f"Validation Loss is {self.compute_loss(image, target_image)}")

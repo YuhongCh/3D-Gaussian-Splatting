@@ -42,17 +42,17 @@ class GaussianRenderer(nn.Module):
     def get_empty_image(self, cam: Camera):
         return torch.zeros((cam.width, cam.height, 3), dtype=torch.float, device=self.device)
 
-    def forward(self, cam: Camera, num_tiles: int = 32) -> torch.Tensor:
+    def forward(self, cam: Camera, num_tiles: int = 64) -> torch.Tensor:
         return self.render(cam, num_tiles)
 
-    def render(self, cam: Camera, tile_length: int = 32):
+    def render(self, cam: Camera, tile_length: int = 64):
         # cull gaussian and project onto screen
         screen_coords = torch.zeros_like(self.model.coords, dtype=torch.float32, device=self.device, requires_grad=True)
 
         pos2d, cov2d, mask = cam.project_gaussian(screen_coords, self.model.coords, self.model.covariance)
         if pos2d is None and cov2d is None:
             print(f"Observed 0 points")
-            return None, None, None
+            return None, None, None, None
         print(f"Observed {pos2d.shape[0]} points")
 
         opacity = self.model.opacity[mask]
@@ -69,7 +69,7 @@ class GaussianRenderer(nn.Module):
         screen.create_tiles(pos2d, radius)
         screen.depth_sort(pos2d[:, 2])
         if screen.tile_count[-1] == 0:
-            return None, None, None
+            return None, None, None, None
 
         # parallelize to render
         render_color = torch.zeros((cam.width, cam.height, 3), dtype=torch.float32, device=self.device)
@@ -94,7 +94,8 @@ class GaussianRenderer(nn.Module):
                                                torch.stack(
                                                    torch.meshgrid(torch.arange(left, right),
                                                                   torch.arange(top, bottom), indexing='ij'), dim=-1
-                                               ).to(self.device))
+                                               ).to(self.device),
+                                               batch_size=64)
 
             # alpha has shape M1xM2xN
             alpha = torch.clamp(curr_opacity.view(-1, 1, 1) * gauss_prob,
@@ -107,4 +108,4 @@ class GaussianRenderer(nn.Module):
             # (M1xM2xN)x(Nx3) => (M1xM2x1xN)x(Nx3) => M1xM2x1x3 => M1xM2x3
             # print(render_color[left:right, top:bottom].shape, alpha.shape, ((alpha * weight) @ curr_color).shape)
             render_color[left:right, top:bottom] += (alpha * weight) @ curr_color
-        return render_color, mask, screen_coords
+        return render_color, mask, screen_coords, radius

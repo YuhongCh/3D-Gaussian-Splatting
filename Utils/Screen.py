@@ -36,38 +36,66 @@ class Screen(nn.Module):
         xmax = torch.clamp((pos2d[:, 0] + radius) // self.tile_length + 1, min=0, max=self.num_block_width).to(torch.int32)
         ymax = torch.clamp((pos2d[:, 1] + radius) // self.tile_length + 1, min=0, max=self.num_block_height).to(torch.int32)
 
-        self.tile_count = torch.zeros((self.num_block_width, self.num_block_height),
-                                      dtype=torch.int32, device=self.device)
+        points = torch.zeros((0, 2), dtype=torch.int32, device=self.device)
         for pid in range(self.num_points):
-            self.tile_count[xmin[pid]:xmax[pid], ymin[pid]:ymax[pid]] += 1
-            torch.cuda.synchronize()
-
-        indices_size = self.tile_count.sum()
-        self.tile_count = torch.cumsum(
-            torch.cat((torch.tensor([0], device=self.device), self.tile_count.flatten())),
-            dim=0, dtype=torch.int32
-        )[:-1].view((self.num_block_width, self.num_block_height))
-
-        count = torch.zeros((self.num_block_width, self.num_block_height), dtype=torch.int32, device=self.device)
-        self.tile_indices = torch.zeros(indices_size, dtype=torch.int32, device=self.device)
-        for pid in range(self.num_points):
-            px_min, py_min = xmin[pid], ymin[pid]
-            px_max, py_max = xmax[pid], ymax[pid]
+            px_min, px_max = xmin[pid], xmax[pid]
+            py_min, py_max = ymin[pid], ymax[pid]
             if px_min == px_max or py_min == py_max:
                 continue
-            tiles = self.tile_count[px_min:px_max, py_min:py_max] + count[px_min:px_max, py_min:py_max]
-            self.tile_indices[tiles] = pid
-            torch.cuda.synchronize()
-            count[px_min:px_max, py_min:py_max] += 1
-            torch.cuda.synchronize()
 
-        self.tile_count = self.tile_count.flatten()
-        # print(f"end create tiles for {self.num_points} points")
+            indices2D = torch.cartesian_prod(torch.arange(px_min, px_max), torch.arange(py_min, py_max))
+            indices1D = indices2D[:, 1] + self.num_block_height * indices2D[:, 0]
+            points = torch.cat((points, torch.zeros((indices1D.shape[0], 2), dtype=torch.int32, device=self.device)))
+
+            points[-indices1D.shape[0]:, 0] = indices1D
+            points[-indices1D.shape[0]:, 1] = pid
+
+        sorted_indices = torch.argsort(points[:, 0])
+        points = points[sorted_indices, :]
+        self.tile_count = torch.cumsum(torch.bincount(points[:, 0]), dim=0, dtype=torch.int32)
+        self.tile_indices = points[:, 1]
+
+
+    # def create_tiles(self, pos2d: torch.tensor, radius: torch.tensor):
+    #     self.num_points = pos2d.shape[0]
+    #     # print(f"start create tiles for {self.num_points} points")
+    #     xmin = torch.clamp((pos2d[:, 0] - radius) // self.tile_length, min=0, max=self.num_block_width).to(torch.int32)
+    #     ymin = torch.clamp((pos2d[:, 1] - radius) // self.tile_length, min=0, max=self.num_block_height).to(torch.int32)
+    #     xmax = torch.clamp((pos2d[:, 0] + radius) // self.tile_length + 1, min=0, max=self.num_block_width).to(torch.int32)
+    #     ymax = torch.clamp((pos2d[:, 1] + radius) // self.tile_length + 1, min=0, max=self.num_block_height).to(torch.int32)
+    #
+    #     self.tile_count = torch.zeros((self.num_block_width, self.num_block_height),
+    #                                   dtype=torch.int32, device=self.device)
+    #     for pid in range(self.num_points):
+    #         self.tile_count[xmin[pid]:xmax[pid], ymin[pid]:ymax[pid]] += 1
+    #         torch.cuda.synchronize()
+    #
+    #     indices_size = self.tile_count.sum()
+    #     self.tile_count = torch.cumsum(
+    #         torch.cat((torch.tensor([0], device=self.device), self.tile_count.flatten())),
+    #         dim=0, dtype=torch.int32
+    #     )[:-1].view((self.num_block_width, self.num_block_height))
+    #
+    #     count = torch.zeros((self.num_block_width, self.num_block_height), dtype=torch.int32, device=self.device)
+    #     self.tile_indices = torch.zeros(indices_size, dtype=torch.int32, device=self.device)
+    #     for pid in range(self.num_points):
+    #         px_min, py_min = xmin[pid], ymin[pid]
+    #         px_max, py_max = xmax[pid], ymax[pid]
+    #         if px_min == px_max or py_min == py_max:
+    #             continue
+    #         tiles = self.tile_count[px_min:px_max, py_min:py_max] + count[px_min:px_max, py_min:py_max]
+    #         self.tile_indices[tiles] = pid
+    #         torch.cuda.synchronize()
+    #         count[px_min:px_max, py_min:py_max] += 1
+    #         torch.cuda.synchronize()
+    #
+    #     self.tile_count = self.tile_count.flatten()
+    #     # print(f"end create tiles for {self.num_points} points")
 
     def depth_sort(self, depth: torch.tensor):
         for tid in range(self.num_block_width * self.num_block_height):
             prev, curr = self.get_indices_range(tid)
-            sorted_indices = torch.argsort(depth[self.tile_indices[prev:curr]], descending=True)
+            sorted_indices = torch.argsort(depth[self.tile_indices[prev:curr]], descending=False)
             self.tile_indices[prev:curr] = self.tile_indices[prev:curr][sorted_indices]
 
     def convert_2dto1d(self, xi: int, yi: int):
@@ -92,5 +120,7 @@ class Screen(nn.Module):
 
     def get_indices_range(self, tile_index: int) -> (int, int):
         assert (0 <= tile_index < self.num_block)
-        next_tid = self.num_points if tile_index == self.num_block - 1 else self.tile_count[tile_index + 1]
-        return self.tile_count[tile_index], next_tid
+        if tile_index >= self.tile_count.shape[0]:
+            return 0, 0
+        prev = 0 if tile_index == 0 else self.tile_count[tile_index - 1]
+        return prev, self.tile_count[tile_index]

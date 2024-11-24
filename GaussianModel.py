@@ -228,7 +228,7 @@ class GaussianModel(nn.Module):
         self._coords_grads[:self._size][mask] += torch.norm(pos2d.grad[mask, :2], dim=-1, keepdim=True)
         self._denom[:self._size][mask] += 1
 
-    def densify(self, scene_radius: torch.float32, min_opacity: torch.float32 = 0.005):
+    def densify(self, scene_radius: torch.float32):
         # TODO: This might still need to limit the size a gaussian can display on screen
         grads = self._coords_grads / self._denom
         grads[grads.isnan()] = 0.0
@@ -242,9 +242,9 @@ class GaussianModel(nn.Module):
         self.split(split_mask[:self._size])
 
         # determine remove
-        remove_mask = self.opacity < min_opacity
-        self.remove(remove_mask)
-        torch.cuda.empty_cache()
+        # remove_mask = self.opacity < min_opacity
+        # self.remove(remove_mask)
+        # torch.cuda.empty_cache()
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']
@@ -310,7 +310,7 @@ class GaussianModel(nn.Module):
         self._coords_grads = torch.zeros_like(self._opacity, dtype=torch.float, device=self._device)
         self._denom = torch.zeros_like(self._opacity, dtype=torch.int, device=self._device)
 
-    def capture(self):
+    def capture(self, optimizer):
         return (
             self.curr_sh_degree,
             self._coords,
@@ -320,5 +320,5 @@ class GaussianModel(nn.Module):
             self._opacity,
             self._coords_grads,
             self._denom,
-            self.optimizer.state_dict(),
+            optimizer.state_dict(),
         )
