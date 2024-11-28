@@ -25,14 +25,16 @@ def main():
     dataloader.split_train_validate_data()
     dataloader.compute_scene_radius()
 
-    model_path = "checkpoints/model.ply"
+    model_path = "checkpoints/model0.ply"
     if not os.path.exists(model_path):
         pcd = dataloader.get_pcd()
         model = GaussianModel.from_pcd(pcd)
     else:
         model = GaussianModel()
         model.load_ply(model_path)
-    trainer = Trainer(model, dataloader, train_steps=5000, debug=False)
+
+
+    trainer = Trainer(model, dataloader)
     trainer.evaluate()
     # trainer.train()
     # model.save_ply(model_path)

@@ -14,8 +14,11 @@ class Trainer:
     def __init__(self, model: GaussianModel, dataloader: DataLoader,
                  lr: float = 1e-3,
                  betas: tuple[float, float] = (0.5, 0.999),
-                 train_steps: int = 2000,
-                 refine_cycle: int = 500,
+                 train_steps: int = 30000,
+                 densify_cycle: int = 100,
+                 opacity_reset_cycle: int = 3000,
+                 sh_update_cycle: int = 1000,
+                 record_cycle: int = 3000,
                  loss_lambda: float = 0.2,
                  result_dir: str = "result/",
                  debug: bool = False):
@@ -23,7 +26,10 @@ class Trainer:
         self.dataloader = dataloader
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr, betas=betas)
         self.train_steps = train_steps
-        self.refine_cycle = refine_cycle
+        self.densify_cycle = densify_cycle
+        self.opacity_reset_cycle = opacity_reset_cycle
+        self.sh_update_cycle = sh_update_cycle
+        self.record_cycle = record_cycle
         self.loss_lambda = loss_lambda
         self.result_dir = result_dir
         self.debug = debug
@@ -50,26 +56,29 @@ class Trainer:
             while rendered_image is None:
                 self.optimizer.zero_grad(set_to_none=True)
                 cam, target_image = self.dataloader.sample(is_train=True, image_scale=self.get_image_scale(train_step))
-                rendered_image, visible_mask, screen_coords, radius = self.renderer(cam)
+                rendered_image, visible_mask, screen_coords, radii = self.renderer(cam)
             loss = self.compute_loss(rendered_image, target_image)
             loss.backward()
 
             # try densify the model
             with torch.no_grad():
                 self.model.update_densify_stats(screen_coords, visible_mask)
-                if train_step > 0 and train_step % 500 == 0:
+                if train_step > 0 and train_step % self.sh_update_cycle == 0:
                     self.model.add_sh_degree()
-                if train_step > 0 and train_step % 50 == 0:
+                if train_step > 0 and train_step % self.densify_cycle == 0:
+                    self.model.max_radii[visible_mask[:, 0], 0] = torch.max(self.model.max_radii[visible_mask[:, 0], 0], radii[visible_mask[:, 0]])
                     self.model.densify(self.scene_radius)
 
                     size_threshold = 20 if train_step > 1500 else 100
-                    remove_mask = (self.model.opacity < 0.005) & (radius > size_threshold)
+                    big_points_vs = self.model.max_radii[:, 0] > size_threshold
+                    big_points_ws = self.model.scale.max(dim=1).values > 0.1 * self.scene_radius
+                    remove_mask = (self.model.opacity[:, 0] < 0.005) | big_points_vs | big_points_ws
                     self.model.remove(remove_mask)
                     torch.cuda.empty_cache()
 
-                if train_step > 0 and train_step % 1500 == 0:
+                if train_step > 0 and train_step % self.opacity_reset_cycle == 0:
                     self.model.reset_opacity()
-                if train_step > 0 and train_step % 500 == 0:
+                if train_step > 0 and train_step % self.record_cycle == 0:
                     print(f"Train step {train_step}: Start evaluate and save checkpoint")
                     self.evaluate(train_step)
                     torch.save((self.model.capture(self.optimizer), train_step), f"checkpoints/checkpoint{train_step}.pth")
@@ -83,7 +92,8 @@ class Trainer:
 
     def evaluate(self, train_step: int = 0):
         cam, target_image = self.dataloader.sample(is_train=False)
-        image, _, _, _ = self.renderer.render(cam, tile_length=32)
+        image, visible_mask, _, _ = self.renderer.paper_render(cam, tile_length=32)
+        print(f"Observed {visible_mask.sum()} points")
 
         np_image = torch2numpy(image.detach())
         result = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR)

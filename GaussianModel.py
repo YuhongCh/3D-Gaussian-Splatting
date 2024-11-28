@@ -15,12 +15,14 @@ class GaussianModel(nn.Module):
     def __init__(self, max_sh_degree: int = 3):
         super(GaussianModel, self).__init__()
         self.max_sh_degree = max_sh_degree
-        self.curr_sh_degree = 0
+        self.curr_sh_degree = max_sh_degree
         self._coords = torch.empty(0)
         self._scale = torch.empty(0)
         self._rotation = torch.empty(0)
         self._sh = torch.empty(0)
         self._opacity = torch.empty(0)
+
+        self.max_radii = torch.empty(0)
         self._coords_grads = torch.empty(0)
         self._denom = torch.empty(0)
         self._size = 0
@@ -51,7 +53,7 @@ class GaussianModel(nn.Module):
 
     @property
     def rotation(self):
-        return self._rotation[:self._size]
+        return torch.nn.functional.normalize(self._rotation[:self._size])
 
     @property
     def opacity(self):
@@ -88,6 +90,7 @@ class GaussianModel(nn.Module):
         model._scale = nn.Parameter(scale, requires_grad=True)
         model._rotation = nn.Parameter(rotation, requires_grad=True)
 
+        model.max_radii = torch.zeros((model.capacity, 1), dtype=torch.float32, device=model._device)
         model._coords_grads = torch.zeros((model.capacity, 1), dtype=torch.float32, device=model._device)
         model._denom = torch.zeros((model.capacity, 1), dtype=torch.int32, device=model._device)
 
@@ -134,47 +137,42 @@ class GaussianModel(nn.Module):
         )).requires_grad_(True)
 
         # grad properties
+        self.max_radii = torch.cat((self.max_radii, torch.zeros((capacity_diff, 1), dtype=torch.float32, device=self._device)), dim=0)
         self._coords_grads = torch.cat((self._coords_grads, torch.zeros((capacity_diff, 1), dtype=torch.float32, device=self._device)), dim=0)
         self._denom = torch.cat((self._denom, torch.zeros((capacity_diff, 1), dtype=torch.int32, device=self._device)), dim=0)
 
-    def remove(self, mask: torch.Tensor, inplace: bool = True):
+    def remove(self, mask: torch.Tensor):
         """
         Remove elements based on mask, if mask is True, remove it.
         :param mask: determine whether to remove the element
-        :param inplace: if in place, remove without update the capacity
         """
-        if inplace:
-            num_removed = mask.sum()
-            if num_removed == 0:
-                return
+        num_removed = mask.sum()
+        if num_removed == 0:
+            return
 
-            mask = ~mask
-            start_index = self._size - num_removed - num_removed
-            self._coords[start_index: start_index + num_removed] = self.coords[mask][-num_removed:]
-            self._opacity[start_index: start_index + num_removed] = self.opacity[mask][-num_removed:]
-            self._rotation[start_index: start_index + num_removed] = self.rotation[mask][-num_removed:]
-            self._sh[start_index: start_index + num_removed] = self._sh[:self._size, :, :][mask][-num_removed:]
-            self._scale[start_index: start_index + num_removed] = self.scale[:self._size][mask][-num_removed:]
+        mask = ~mask
+        # start_index = self._size - num_removed - num_removed
+        # self._coords[start_index: start_index + num_removed] = self.coords[mask][-num_removed:]
+        # self._opacity[start_index: start_index + num_removed] = self.opacity[mask][-num_removed:]
+        # self._rotation[start_index: start_index + num_removed] = self.rotation[mask][-num_removed:]
+        # self._sh[start_index: start_index + num_removed] = self._sh[:self._size, :, :][mask][-num_removed:]
+        # self._scale[start_index: start_index + num_removed] = self._scale[:self._size][mask][-num_removed:]
+        #
+        # self._coords_grads[start_index: start_index + num_removed] = self._coords_grads[:self._size][mask][-num_removed:]
+        # self._denom[start_index: start_index + num_removed] = self._denom[:self._size][mask][-num_removed:]
+        self._coords = nn.Parameter(self._coords[mask])
+        self._opacity = nn.Parameter(self._opacity[mask])
+        self._rotation = nn.Parameter(self._rotation[mask])
+        self._sh = nn.Parameter(self._sh[:self._size, :, :][mask])
+        self._scale = nn.Parameter(self._scale[:self._size][mask])
 
-            self._coords_grads[start_index: start_index + num_removed] = self._coords_grads[:self._size][mask][-num_removed:]
-            self._denom[start_index: start_index + num_removed] = self._denom[:self._size][mask][-num_removed:]
+        self.max_radii = self.max_radii[:self._size][mask]
+        self._coords_grads = self._coords_grads[:self._size][mask]
+        self._denom = self._denom[:self._size][mask]
 
-            self._size -= num_removed
-        else:
-            # TODO: Check if there is Bug Later
-            mask = ~mask
-            self._coords = self.coords[mask]
-            self._opacity = self.opacity[mask]
-            self._sh = self._sh[mask]
-            self._scale = self.opacity[mask]
-            self._rotation = self.rotation[mask]
+        self._size -= num_removed
 
-            self._coords_grads = self._coords_grads[:self._size][mask]
-            self._denom = self._denom[:self._size][mask]
-
-            self._size = self._coords.shape[0]
-
-    def clone(self, mask: torch.Tensor, expand_factor: torch.uint8 = 2):
+    def clone(self, mask: torch.Tensor, expand_factor: torch.uint8 = 1):
         num_clone = mask.sum()
         if num_clone == 0:
             return
@@ -193,7 +191,7 @@ class GaussianModel(nn.Module):
         self._denom = torch.zeros((self.capacity, 1), dtype=torch.int32, device=self._device)
         self._size = new_size
 
-    def split(self, mask: torch.Tensor, expand_factor: torch.uint8 = 2, split_factor: torch.uint8 = 2):
+    def split(self, mask: torch.Tensor, expand_factor: torch.uint8 = 1, split_factor: torch.uint8 = 2):
         num_split = mask.sum()
         if num_split == 0:
             return
@@ -302,6 +300,8 @@ class GaussianModel(nn.Module):
         self._opacity = nn.Parameter(torch.tensor(opacity, dtype=torch.float, device=self._device).requires_grad_(True))
         self._scale = nn.Parameter(torch.tensor(scale, dtype=torch.float, device=self._device).requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rot, dtype=torch.float, device=self._device).requires_grad_(True))
+
+        self.max_radii = torch.zeros_like(self._opacity, dtype=torch.float, device=self._device)
         self._coords_grads = torch.zeros_like(self._opacity, dtype=torch.float, device=self._device)
         self._denom = torch.zeros_like(self._opacity, dtype=torch.int, device=self._device)
 
@@ -313,6 +313,7 @@ class GaussianModel(nn.Module):
             self._scale,
             self._rotation,
             self._opacity,
+            self.max_radii,
             self._coords_grads,
             self._denom,
             optimizer.state_dict(),

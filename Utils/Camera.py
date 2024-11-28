@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from math import tan, atan
+import math
 from Utils.Transform import Transform
 
 
@@ -42,13 +42,26 @@ class Camera(nn.Module):
         #       f"width={width}, height={height}")
         return camera
 
-    def get_projection_matrix(self, near: float = 0.1, far: float = 1000) -> np.ndarray:
-        proj_matrix = np.array([
-            [2 * self.fx / self.width, 0, -(2 * self.cx / self.width - 1), 0],
-            [0, 2 * self.fy / self.height, -(2 * self.cy / self.height - 1), 0],
-            [0, 0, -(far + near) / (far - near), -2 * far * near / (far - near)],
-            [0, 0, -1, 0],
-        ], dtype=float)
+    def get_projection_matrix(self, near: float = 0.01, far: float = 100) -> np.ndarray:
+        # proj_matrix = np.array([
+        #     [2 * self.fx / self.width, 0, -(2 * self.cx / self.width - 1), 0],
+        #     [0, 2 * self.fy / self.height, -(2 * self.cy / self.height - 1), 0],
+        #     [0, 0, -(far + near) / (far - near), -2 * far * near / (far - near)],
+        #     [0, 0, -1, 0],
+        # ], dtype=float)
+        # return proj_matrix
+        tanHalfFovY = math.tan(0.5 * self.focal2fov(self.fy, self.height))
+        tanHalfFovX = math.tan(0.5 * self.focal2fov(self.fx, self.width))
+        top, right = tanHalfFovY * near, tanHalfFovX * near
+        bottom, left = -top, -right
+        proj_matrix = np.zeros((4, 4))
+        proj_matrix[0, 0] = 2 * near / (right - left)
+        proj_matrix[1, 1] = 2 * near / (top - bottom)
+        proj_matrix[0, 2] = (right + left) / (right - left)
+        proj_matrix[1, 2] = (top + bottom) / (top - bottom)
+        proj_matrix[3, 2] = 1.0
+        proj_matrix[2, 2] = far / (far - near)
+        proj_matrix[2, 3] = -(far * near) / (far - near)
         return proj_matrix
 
     def get_covariance2d(self, pos2d: torch.tensor, cov3d: torch.tensor):
@@ -95,3 +108,7 @@ class Camera(nn.Module):
         pos2d[:, 1] = (1 - 0.5 * (pos2d[:, 1] + 1)) * self.height
         cov2d = self.get_covariance2d(pos3d_homo[mask], cov3d[mask])
         return pos2d, cov2d, mask
+
+    @staticmethod
+    def focal2fov(focal, num_pixel):
+        return 2 * math.atan(0.5 * num_pixel / focal)
