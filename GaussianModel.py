@@ -26,6 +26,8 @@ class GaussianModel(nn.Module):
         self._size = 0
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
+        self.opactiy_activation = torch.sigmoid
+        self.rotation_activation = torch.nn.functional.normalize
         self.scale_activation = torch.exp
         self.scale_inv_activation = torch.log
 
@@ -51,11 +53,11 @@ class GaussianModel(nn.Module):
 
     @property
     def rotation(self):
-        return self._rotation[:self._size]
+        return self.rotation_activation(self._rotation[:self._size])
 
     @property
     def opacity(self):
-        return self._opacity[:self._size]
+        return self.opactiy_activation(self._opacity[:self._size])
 
     @property
     def sh(self):

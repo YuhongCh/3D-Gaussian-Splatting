@@ -34,7 +34,7 @@ class Trainer:
     def compute_loss(self, pred: torch.Tensor, gt: torch.Tensor) -> torch.Tensor:
         ssim = ssim_loss(pred, gt)
         l1 = l1_loss(pred, gt)
-        return (1 - self.loss_lambda) * l1 + self.loss_lambda * ssim
+        return (1 - self.loss_lambda) * l1 + self.loss_lambda * (1 - ssim)
 
     def get_image_scale(self, step: int):
         if step < 250:
@@ -49,7 +49,7 @@ class Trainer:
             rendered_image = None
             while rendered_image is None:
                 self.optimizer.zero_grad(set_to_none=True)
-                cam, target_image = self.dataloader.sample(is_train=True, image_scale=self.get_image_scale(train_step))
+                cam, target_image = self.dataloader.sample(is_train=True)
                 rendered_image, visible_mask, screen_coords, radius = self.renderer(cam)
             loss = self.compute_loss(rendered_image, target_image)
             loss.backward()
