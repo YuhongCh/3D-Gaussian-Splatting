@@ -34,7 +34,9 @@ class DataLoader:
         database_dir = Path(self.sfm_dir)
         database_dir.mkdir(parents=True, exist_ok=True)
         try:
-            pycolmap.extract_features(self.database_file, self.image_dir, camera_model="SIMPLE_PINHOLE")
+            pycolmap.extract_features(self.database_file, self.image_dir,
+                                      camera_mode=pycolmap.CameraMode.SINGLE,
+                                      camera_model="PINHOLE")
             pycolmap.match_exhaustive(self.database_file)
 
             sfm_reconstruction = pycolmap.incremental_mapping(self.database_file, self.image_dir, self.sparse_dir)
@@ -43,6 +45,9 @@ class DataLoader:
         except Exception as e:
             database_dir.unlink()
             print(f"Extract keypoint failed: {e}")
+        # print(f"extracted {self.sfm_reconstruction.num_camera()} cameras, "
+        #       f"{self.sfm_reconstruction.num_images()} images, "
+        #       f"{self.sfm_reconstruction.num_points3D()} points")
 
     def get_pcd(self) -> PointCloud:
         pcd = PointCloud()
@@ -57,8 +62,9 @@ class DataLoader:
         pcd.set_colors(colors)
         return pcd
 
-    def split_train_validate_data(self, ratio: float = 0.9):
+    def split_train_validate_data(self, ratio: float = 0.8):
         image_ids = self.sfm_reconstruction.reg_image_ids()
+        random.shuffle(image_ids)
         num_train_ids = int(len(image_ids) * ratio)
         self.train_image_ids = image_ids[:num_train_ids]
         self.validate_image_ids = image_ids[num_train_ids:]

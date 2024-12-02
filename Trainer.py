@@ -62,10 +62,11 @@ class Trainer:
                 if train_step > 0 and train_step % 50 == 0:
                     self.model.densify(self.scene_radius)
 
-                    size_threshold = 20 if train_step > 1500 else 100
+                    size_threshold = 20 if train_step > 1500 else 1000
                     remove_mask = (self.model.opacity < 0.005) & (radius > size_threshold)
                     self.model.remove(remove_mask)
                     torch.cuda.empty_cache()
+                    print(f"There are {self.model._size} in size and {self.model.capacity} in capacity")
 
                 if train_step > 0 and train_step % 1500 == 0:
                     self.model.reset_opacity()
@@ -80,10 +81,19 @@ class Trainer:
                 progress_bar.update(10)
         progress_bar.close()
 
-
+    @torch.no_grad
     def evaluate(self, train_step: int = 0):
-        cam, target_image = self.dataloader.sample(is_train=False)
-        image, _, _, _ = self.renderer.render(cam, tile_length=32)
+        iter = 0
+        MAX_ITER = 50
+
+        image = None
+        while image is None and iter < MAX_ITER:
+            cam, target_image = self.dataloader.sample(is_train=False)
+            image, _, _, _ = self.renderer(cam)
+            iter += 1
+        if iter >= MAX_ITER:
+            print("Failed to evaluate, iteration reaches maximum")
+            return
 
         np_image = torch2numpy(image.detach())
         result = cv2.cvtColor(np_image, cv2.COLOR_RGB2BGR)

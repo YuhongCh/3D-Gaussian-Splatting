@@ -183,8 +183,9 @@ class GaussianModel(nn.Module):
 
         new_size = self._size + num_clone
         if new_size >= self.capacity:
-            new_capacity = self._size + num_clone * expand_factor
+            new_capacity = self.capacity * 2
             self.expand_capacity(new_capacity)
+
         self._coords[self._size: new_size] = self._coords[:self._size][mask]
         self._opacity[self._size: new_size] = self._opacity[:self._size][mask]
         self._rotation[self._size: new_size] = self._rotation[:self._size][mask]
@@ -202,14 +203,14 @@ class GaussianModel(nn.Module):
 
         new_size = self._size + num_split * (split_factor - 1)
         if new_size >= self.capacity:
-            new_capacity = self._size + num_split * (split_factor - 1) * expand_factor
+            new_capacity = 2 * self.capacity
             self.expand_capacity(new_capacity)
 
-        stds = self._scale[:self._size][mask].repeat(split_factor, 1)
+        stds = self.scale[mask].repeat(split_factor, 1)
         sample_means = torch.normal(torch.zeros((num_split * split_factor, 3), device=self._device), std=stds)
-        rot_matrix = Transform.get_rotation_matrices(self._rotation[:self._size][mask], use_torch=True).repeat(split_factor, 1, 1).transpose(1, 2)
+        rot_matrix = Transform.get_rotation_matrices(self.rotation[mask], use_torch=True).repeat(split_factor, 1, 1).transpose(1, 2)
         sample_means = torch.squeeze(sample_means[:, None, :] @ rot_matrix[:, :3, :3]) + rot_matrix[:, 3, :3]
-        sample_scales = self.scale_inv_activation(self._scale[:self._size][mask].repeat(split_factor, 1) / (0.8*split_factor))
+        sample_scales = self.scale_inv_activation(self.scale[mask].repeat(split_factor, 1) / (0.8*split_factor))
 
         # assign to original position
         self._coords[:self._size][mask] = sample_means[:num_split]
@@ -242,6 +243,15 @@ class GaussianModel(nn.Module):
         pad_grads[:min(self._size, grads.shape[0])] = grads[:self._size]
         split_mask = (torch.norm(pad_grads, dim=-1) >= 0.0002) & (torch.max(self._scale[:self._size], dim=1).values > 0.01 * scene_radius)
         self.split(split_mask[:self._size])
+
+    def debug_memory(self):
+        print(f"coords takes memory {self._coords.element_size() * self._coords.nelement()}")
+        print(f"opacity takes memory {self._opacity.element_size() * self._opacity.nelement()}")
+        print(f"scale takes memory {self._scale.element_size() * self._scale.nelement()}")
+        print(f"rotation takes memory {self._rotation.element_size() * self._rotation.nelement()}")
+        print(f"sh takes memory {self._sh.element_size() * self._sh.nelement()}")
+        print(f"coords_grads takes memory {self._coords_grads.element_size() * self._coords_grads.nelement()}")
+        print(f"denom takes memory {self._denom.element_size() * self._denom.nelement()}")
 
     def construct_list_of_attributes(self):
         l = ['x', 'y', 'z', 'nx', 'ny', 'nz']

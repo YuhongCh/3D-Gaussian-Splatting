@@ -5,11 +5,11 @@ import math
 from GaussianModel import GaussianModel
 from Utils.Camera import Camera
 from Utils.Screen import Screen
-# from Utils.ContainerUtils import numpy2torch
+from Utils.ContainerUtils import numpy2torch
 from Utils.SphericalHarmonic import eval_sh
 from Utils.Probability import gaussian_distribution
 
-# from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
+from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
 
 
 class GaussianRenderer(nn.Module):
@@ -49,9 +49,13 @@ class GaussianRenderer(nn.Module):
         return torch.zeros((cam.width, cam.height, 3), dtype=torch.float, device=self.device)
 
     def forward(self, cam: Camera, num_tiles: int = 64) -> torch.Tensor:
-        return self.render(cam, num_tiles)
+         return self.render(cam, num_tiles)
 
     def render(self, cam: Camera, tile_length: int = 64):
+        def empty():
+            # print(f"Camera sees nothing at {cam.transform.position} with rotation {cam.transform.rotation}")
+            return None, None, None, None
+
         # cull gaussian and project onto screen
         if self.ScreenWidth != cam.width or self.ScreenHeight != cam.height:
             self.ScreenWidth = cam.width
@@ -63,7 +67,7 @@ class GaussianRenderer(nn.Module):
 
         pos2d, cov2d, mask = cam.project_gaussian(screen_coords, self.model.coords, self.model.covariance)
         if pos2d is None and cov2d is None:
-            return None, None, None, None
+            return empty()
 
         opacity = self.model.opacity[mask]
         color = eval_sh(self.model.sh_degree,
@@ -108,43 +112,6 @@ class GaussianRenderer(nn.Module):
 
             # (M1xM2xN)x(Nx3) => (M1xM2x1xN)x(Nx3) => M1xM2x1x3 => M1xM2x3
             render_color[left:right, top:bottom] += (alpha * weight) @ curr_color
+        if not render_color.requires_grad:
+            return empty()
         return render_color, mask, screen_coords, radius
-
-    # def paper_render(self, cam: Camera, num_tiles: int = 64):
-    #     screen_coords = torch.zeros_like(self.model.coords, dtype=torch.float32, device=self.device, requires_grad=True)
-    #     tanfovx = math.tan(Camera.focal2fov(cam.fx, cam.width) * 0.5)
-    #     tanfovy = math.tan(Camera.focal2fov(cam.fy, cam.height) * 0.5)
-    #     view_matrix = cam.transform.get_world2model_matrix(use_torch=True)
-    #
-    #     raster_settings = GaussianRasterizationSettings(
-    #         image_height=int(cam.height),
-    #         image_width=int(cam.width),
-    #         tanfovx=tanfovx,
-    #         tanfovy=tanfovy,
-    #         bg=torch.tensor([0, 0, 0], dtype=torch.float32, device=self.device),
-    #         scale_modifier=1.0,
-    #         viewmatrix=view_matrix,
-    #         projmatrix=cam.projection_matrix,
-    #         sh_degree=self.model.sh_degree,
-    #         campos=numpy2torch(cam.transform.position, device=self.device).to(torch.float32),
-    #         prefiltered=False,
-    #         debug=False,
-    #         antialiasing=False
-    #     )
-    #
-    #     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
-    #
-    #     means3D = self.model.coords
-    #     means2D = screen_coords
-    #
-    #     rendered_image, radii, depth_image = rasterizer(
-    #         means3D=means3D,
-    #         means2D=means2D,
-    #         shs=self.model.sh,
-    #         colors_precomp=None,
-    #         opacities=self.model.opacity,
-    #         scales=self.model.scale,
-    #         rotations=self.model.rotation,
-    #         cov3D_precomp=None)
-    #     rendered_image = rendered_image.clamp(0, 1)
-    #     return rendered_image.permute((2, 1, 0)), (radii > 0).nonzero(), screen_coords, radii

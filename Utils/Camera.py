@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from math import tan, atan
+import math
 from Utils.Transform import Transform
 
 
@@ -31,8 +31,10 @@ class Camera(nn.Module):
     def from_sfm(sfm_image: "pycolmap.Image", sfm_camera: "pycolmap.Camera", width: float, height: float) -> "Camera":
         # print("Start build Camera from SfM data")
         rigid3d = sfm_image.cam_from_world
-        position = rigid3d.translation
         rotation = np.roll(rigid3d.rotation.quat, -1)    # has quaternion [x,y,z,w], need to change to [w,x,y,z]
+        # translate = rigid3d.translation
+        # rot_matrix = Transform.get_rotation_matrix(rotation[0], rotation[1], rotation[2], rotation[3])
+        position = sfm_image.projection_center()
 
         # print(sfm_camera.params_to_string)
         camera = Camera(position, rotation,
@@ -42,13 +44,30 @@ class Camera(nn.Module):
         #       f"width={width}, height={height}")
         return camera
 
-    def get_projection_matrix(self, near: float = 0.1, far: float = 1000) -> np.ndarray:
+    def get_projection_matrix(self, near: float = 0.1, far: float = 100) -> np.ndarray:
+        # Compute field of view (FoV) in radians
+        fov_x = 2 * math.atan(self.width / (2 * self.fx))
+        fov_y = 2 * math.atan(self.height / (2 * self.fy))
+
+        # Compute frustum planes
+        top = near * math.tan(fov_y / 2)
+        bottom = -top
+        right = near * math.tan(fov_x / 2)
+        left = -right
+
         proj_matrix = np.array([
-            [2 * self.fx / self.width, 0, -(2 * self.cx / self.width - 1), 0],
-            [0, 2 * self.fy / self.height, -(2 * self.cy / self.height - 1), 0],
-            [0, 0, -(far + near) / (far - near), -2 * far * near / (far - near)],
-            [0, 0, -1, 0],
+            [2 * near / (right - left), 0, 0, -near*(right+left)/(right-left)],
+            [0, 2*near/(top-bottom), 0, -near*(top+bottom)/(top-bottom)],
+            [0, 0, -(far+near)/(far-near), 2*far*near/(near-far)],
+            [0, 0, -1, 0]
         ], dtype=float)
+
+        # proj_matrix = np.array([
+        #     [self.fx, 0, 0, 0],
+        #     [0, self.fy, 0, 0],
+        #     [0, 0, -(far + near) / (far - near), -2 * far * near / (far - near)],
+        #     [0, 0, -1, 0],
+        # ], dtype=float)
         return proj_matrix
 
     def get_covariance2d(self, pos2d: torch.tensor, cov3d: torch.tensor):
@@ -83,7 +102,7 @@ class Camera(nn.Module):
         p_ndc = p_ndc[:, :3] / torch.clamp(p_ndc[:, 3][:, None], min=0.000001)
 
         ''' Create cull mask, recall ndc space should be [-1, 1] '''
-        mask = (0.2 <= p_ndc[:, 2]) & (p_ndc[:, 2] <= relax_factor) & \
+        mask = (0.1 <= p_ndc[:, 2]) & (p_ndc[:, 2] <= relax_factor) & \
                (-relax_factor <= p_ndc[:, 0]) & (p_ndc[:, 0] <= relax_factor) & \
                (-relax_factor <= p_ndc[:, 1]) & (p_ndc[:, 1] <= relax_factor)
 
@@ -95,3 +114,7 @@ class Camera(nn.Module):
         pos2d[:, 1] = (1 - 0.5 * (pos2d[:, 1] + 1)) * self.height
         cov2d = self.get_covariance2d(pos3d_homo[mask], cov3d[mask])
         return pos2d, cov2d, mask
+
+    @staticmethod
+    def focal2fov(focal, num_pixel):
+        return 2 * math.atan(0.5 * num_pixel / focal)

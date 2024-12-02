@@ -1,3 +1,5 @@
+import numpy as np
+
 from Utils.ContainerUtils import *
 
 
@@ -24,7 +26,7 @@ class Transform:
 
     @staticmethod
     def get_rotation_matrix(w: float, x: float, y: float, z: float, use_torch: bool = False):
-        rot =  np.array([
+        rot = np.array([
             [2 * (w * w + x * x) - 1, 2 * (x * y - w * z),     2 * (x * z + w * y),     0],
             [2 * (x * y + w * z),     2 * (w * w + y * y) - 1, 2 * (y * z - w * x),     0],
             [2 * (x * z - w * y),     2 * (y * z + w * x),     2 * (w * w + z * z) - 1, 0],
@@ -101,7 +103,7 @@ class Transform:
     def get_inv_scale_matrix(x: float, y: float, z: float, use_torch: bool = False):
         if x == 0 or y == 0 or z == 0:
             raise RuntimeError(f"Cannot divide by zero with components ({x},{y},{z})")
-        return Transform.get_scale_matrix(1.0 / x, 1.0 / x, 1.0 / z, use_torch=use_torch)
+        return Transform.get_scale_matrix(1.0 / x, 1.0 / y, 1.0 / z, use_torch=use_torch)
 
     @staticmethod
     def get_translation_matrix(x: float, y: float, z: float, use_torch: bool = False):
@@ -130,9 +132,7 @@ class Transform:
         return m2w
 
     def get_world2model_matrix(self, use_torch: bool = False):
-        w2m = (self.get_inv_translation_matrix(self.position[0], self.position[1], self.position[2]) @
-               self.get_inv_rotation_matrix(self.rotation[0], self.rotation[1], self.rotation[2], self.rotation[3]) @
-               self.get_inv_scale_matrix(self.scale[0], self.scale[1], self.scale[2]))
+        w2m = np.linalg.inv(self.get_model2world_matrix())
         if use_torch:
             return numpy2torch(w2m)
         return w2m
