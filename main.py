@@ -20,7 +20,7 @@ def main():
         for k, v in config[key].items():
             setattr(args, k, v)
 
-    dataloader = DataLoader(image_dir="dataset/head", sfm_dir="sfm_directory/head", seed=123)
+    dataloader = DataLoader(image_dir="HumanHeadImages", sfm_dir="sfm_directory/head", seed=123)
     dataloader.extract_keypoint()
     dataloader.split_train_validate_data()
     dataloader.compute_scene_radius()
@@ -33,6 +33,7 @@ def main():
         model = GaussianModel()
         model.load_ply(model_path)
     trainer = Trainer(model, dataloader, train_steps=7000, debug=False)
+    # trainer.test()
     # trainer.evaluate()
     trainer.train()
     model.save_ply(model_path)

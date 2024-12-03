@@ -9,8 +9,6 @@ from Utils.ContainerUtils import numpy2torch
 from Utils.SphericalHarmonic import eval_sh
 from Utils.Probability import gaussian_distribution
 
-from diff_gaussian_rasterization import GaussianRasterizationSettings, GaussianRasterizer
-
 
 class GaussianRenderer(nn.Module):
 
@@ -112,6 +110,4 @@ class GaussianRenderer(nn.Module):
 
             # (M1xM2xN)x(Nx3) => (M1xM2x1xN)x(Nx3) => M1xM2x1x3 => M1xM2x3
             render_color[left:right, top:bottom] += (alpha * weight) @ curr_color
-        if not render_color.requires_grad:
-            return empty()
         return render_color, mask, screen_coords, radius

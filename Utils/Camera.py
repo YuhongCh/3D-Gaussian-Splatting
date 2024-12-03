@@ -31,9 +31,10 @@ class Camera(nn.Module):
     def from_sfm(sfm_image: "pycolmap.Image", sfm_camera: "pycolmap.Camera", width: float, height: float) -> "Camera":
         # print("Start build Camera from SfM data")
         rigid3d = sfm_image.cam_from_world
-        rotation = np.roll(rigid3d.rotation.quat, -1)    # has quaternion [x,y,z,w], need to change to [w,x,y,z]
-        # translate = rigid3d.translation
-        # rot_matrix = Transform.get_rotation_matrix(rotation[0], rotation[1], rotation[2], rotation[3])
+        rotation = np.roll(rigid3d.rotation.quat, 1)    # has quaternion [x,y,z,w], need to change to [w,x,y,z]
+        rotation[1] = -rotation[1]
+        rotation[2] = -rotation[2]
+        rotation[3] = -rotation[3]
         position = sfm_image.projection_center()
 
         # print(sfm_camera.params_to_string)
@@ -99,10 +100,10 @@ class Camera(nn.Module):
         # modelpos3d = pos3d_homo @ w2m
         pos3d_homo = torch.cat([pos3d, torch.ones((pos3d.shape[0], 1), device=self.device)], dim=1)
         p_ndc = pos3d_homo @ self.world2model_matrix.T @ self.projection_matrix.T
-        p_ndc = p_ndc[:, :3] / torch.clamp(p_ndc[:, 3][:, None], min=0.000001)
+        p_ndc = p_ndc[:, :3] / p_ndc[:, 3][:, None]
 
         ''' Create cull mask, recall ndc space should be [-1, 1] '''
-        mask = (0.1 <= p_ndc[:, 2]) & (p_ndc[:, 2] <= relax_factor) & \
+        mask = (p_ndc[:, 2] >= 0.1) & \
                (-relax_factor <= p_ndc[:, 0]) & (p_ndc[:, 0] <= relax_factor) & \
                (-relax_factor <= p_ndc[:, 1]) & (p_ndc[:, 1] <= relax_factor)
 
